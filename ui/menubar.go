@@ -10,8 +10,9 @@ type MenuBar struct {
 	*tview.Box
 	Options                 []*MenuBarOption
 	CurrentOption           int
-	ExpandCurrentOption     bool
+	CurrentOptionExpanded   bool
 	CurrentOptionIsExpanded bool
+	focus                   tview.Focusable
 }
 
 type MenuBarOption struct {
@@ -21,19 +22,22 @@ type MenuBarOption struct {
 }
 
 func NewMenuBar() *MenuBar {
-	return &MenuBar{
+	menu := &MenuBar{
 		Box: tview.NewBox(),
 		Options: nil,
 		CurrentOption: -1,
-		ExpandCurrentOption: false,
+		CurrentOptionExpanded: false,
 		CurrentOptionIsExpanded: false,
 	}
+	menu.focus = menu
+	return menu
 }
 
 type DropdownMenu struct {
 	*tview.Box
 	Options       []*DropdownMenuOption
 	CurrentOption int
+	MenuBar       *MenuBar
 }
 
 type DropdownMenuOption struct {
@@ -57,7 +61,7 @@ func (r *DropdownMenu) Draw(screen tcell.Screen) {
 		line := fmt.Sprintf(` %s `, option.Title)
 
 		if index == r.CurrentOption {
-			lineStyle := tcell.StyleDefault.Background(tcell.ColorDarkBlue)
+			lineStyle := tcell.StyleDefault.Background(tcell.ColorDarkGreen)
 			for i := 0; i < width; i++ {
 				screen.SetContent(x+i, y+index, ' ', nil, lineStyle)
 			}
@@ -93,6 +97,10 @@ func (r *DropdownMenu) InsertOption(index int, title string, selected func()) *D
 	return r
 }
 
+func (r *DropdownMenu) HightlightFirstOption() {
+	r.CurrentOption = 0
+}
+
 func (r *DropdownMenu) InputHandler() func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
 	return r.WrapInputHandler(func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
 		if(!r.HasFocus()) {
@@ -104,25 +112,62 @@ func (r *DropdownMenu) InputHandler() func(event *tcell.EventKey, setFocus func(
 				r.CurrentOption++
 			case tcell.KeyUp:
 				r.CurrentOption--
+			case tcell.KeyRight:
+				r.MenuBar.collapseCurrentOptionAndExpandNext(setFocus)
+			case tcell.KeyLeft:
+				r.MenuBar.collapseCurrentOptionAndExpandPrevious(setFocus)
 		}
 
 		if r.CurrentOption < 0 {
-				r.CurrentOption = 0
+			r.MenuBar.collapseCurrentOption(setFocus)
 		} else if r.CurrentOption >= len(r.Options) {
-				r.CurrentOption = len(r.Options) - 1
+			r.CurrentOption = len(r.Options) - 1
 		}
 
 	})
 }
 
-//func (r *DropdownMenu) Focus(delegate func(p tview.Primitive)) {
-//}
+func (r *DropdownMenu) MouseHandler() func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(p tview.Primitive)) (consumed bool, capture tview.Primitive) {
+	return r.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(p tview.Primitive)) (consumed bool, capture tview.Primitive) {
+		if !r.InRect(event.Position()) {
+			setFocus(r)
+			// Mouse cursor is outside the menu rect
+			if action == tview.MouseLeftClick {
+				return false, nil
+			}
+		} else {
+			// Mouse cursor is inside the menu rect
+			setFocus(r)
+
+			_, rectY, _, _ := r.GetInnerRect()
+			_, y := event.Position()
+
+			cursorYPos := y - rectY
+
+			// Process mouse event.
+			switch action {
+				case tview.MouseMove:
+					// Rollover submenu option
+					r.CurrentOption = cursorYPos
+					consumed = true
+				case tview.MouseLeftClick:
+					// Click submenu option
+					consumed = true
+			}
+		}
+
+		return
+	})
+}
+
+/*func (r *DropdownMenu) Focus(delegate func(p tview.Primitive)) {
+}*/
 
 func (r *MenuBar) Blur() {
-	if !r.CurrentOptionIsExpanded {
-		r.CurrentOption = -1
-		r.ExpandCurrentOption = false
-	}
+}
+
+func (r *MenuBar) HightlightFirstOption() {
+	r.CurrentOption = 0
 }
 
 func (r *MenuBar) AddOption(title string, on_selected func(), submenu *DropdownMenu) *MenuBar {
@@ -131,6 +176,10 @@ func (r *MenuBar) AddOption(title string, on_selected func(), submenu *DropdownM
 }
 
 func (r *MenuBar) InsertOption(index int, title string, selected func(), submenu *DropdownMenu) *MenuBar {
+	if submenu != nil {
+		submenu.MenuBar = r
+	}
+
 	option := &MenuBarOption{ Title: title, OnSelected: selected, Submenu: submenu }
 
 	if index < 0 {
@@ -161,7 +210,6 @@ func (r *MenuBar) Draw(screen tcell.Screen) {
 		width := len(line)
 		optionColor := tcell.ColorWhite
 		if index == r.CurrentOption {
-
 			// Highlight the background of the current option in the menu bar
 			lineStyle := tcell.StyleDefault.Background(tcell.ColorDarkGreen)
 			for i := 0; i < width; i++ {
@@ -169,8 +217,8 @@ func (r *MenuBar) Draw(screen tcell.Screen) {
 			}
 
 			// Draw, if needed, the submenu of the current option
-			if (option.Submenu != nil) && (r.ExpandCurrentOption) {
-				option.Submenu.SetRect(x, y+1, 40, len(option.Submenu.Options))
+			if (option.Submenu != nil) && (r.CurrentOptionExpanded) {
+				option.Submenu.SetRect(xPos, y+1, 40, len(option.Submenu.Options))
 				option.Submenu.Draw(screen)
 			}
 		}
@@ -181,7 +229,49 @@ func (r *MenuBar) Draw(screen tcell.Screen) {
 	}
 }
 
-func (r *MenuBar) SelectCurrentOption(showCollapsed bool, setFocus func(p tview.Primitive)) {
+func (r *MenuBar) collapseCurrentOptionAndExpandNext(setFocus func(p tview.Primitive)) {
+	if r.CurrentOption >= len(r.Options) - 1 {
+		return
+	}
+
+	r.CurrentOption++
+	r.expandCurrentOption(setFocus)
+}
+
+func (r *MenuBar) collapseCurrentOptionAndExpandPrevious(setFocus func(p tview.Primitive)) {
+	if r.CurrentOption <= 0 {
+		return
+	}
+
+	r.CurrentOption--
+	r.expandCurrentOption(setFocus)
+}
+
+func (r *MenuBar) collapseCurrentOption(setFocus func(p tview.Primitive)) {
+	if r.CurrentOption < 0 {
+		return
+	}
+
+	// Collapse the current option
+	r.CurrentOptionExpanded = false
+	setFocus(r)
+}
+
+func (r *MenuBar) expandCurrentOption(setFocus func(p tview.Primitive)) {
+	if r.CurrentOption < 0 {
+		return
+	}
+
+	// Expand the current option
+	option := r.Options[r.CurrentOption]
+	if option.Submenu != nil {
+		r.CurrentOptionExpanded = true
+		option.Submenu.HightlightFirstOption()
+		setFocus(option.Submenu)
+	}
+}
+
+func (r *MenuBar) selectCurrentOption(setFocus func(p tview.Primitive)) {
 	if r.CurrentOption < 0 {
 		return
 	}
@@ -190,18 +280,6 @@ func (r *MenuBar) SelectCurrentOption(showCollapsed bool, setFocus func(p tview.
 	option := r.Options[r.CurrentOption]
 	if option.OnSelected != nil {
 		option.OnSelected()
-	}
-
-	if (option.Submenu != nil) && !showCollapsed {
-		r.ExpandCurrentOption = !r.ExpandCurrentOption
-		if r.ExpandCurrentOption {
-			r.CurrentOptionIsExpanded = true
-			setFocus(option.Submenu)
-		}
-	}
-
-	if showCollapsed {
-		r.ExpandCurrentOption = false
 	}
 }
 
@@ -216,18 +294,16 @@ func (r *MenuBar) InputHandler() func(event *tcell.EventKey, setFocus func(p tvi
 				r.CurrentOption++
 			case tcell.KeyLeft:
 				r.CurrentOption--
-			case tcell.KeyEnter:
-				r.SelectCurrentOption(false, setFocus) // Show current option expanded if needed
-			case tcell.KeyDown:
-				r.ExpandCurrentOption = true
+			case tcell.KeyEnter, tcell.KeyDown:
+				r.expandCurrentOption(setFocus) // Expand current option
 			case tcell.KeyUp:
-				r.ExpandCurrentOption = false
+				r.CurrentOptionExpanded = false
 		}
 
 		if r.CurrentOption < 0 {
-				r.CurrentOption = 0
+			r.CurrentOption = 0
 		} else if r.CurrentOption >= len(r.Options) {
-				r.CurrentOption = len(r.Options) - 1
+			r.CurrentOption = len(r.Options) - 1
 		}
 
 	})
@@ -240,12 +316,13 @@ func (r *MenuBar) IndexAtPoint(x, y int) int {
 	}
 
 	cursorXPos := x - rectX
+	cursorYPos := y - rectY
 	optionXStart := rectX
 
 	for index, option := range r.Options {
 		optionWidth := len(option.Title)+2
 		optionXEnd := optionXStart + optionWidth
-		if optionXStart <= cursorXPos && cursorXPos <= optionXEnd {
+		if optionXStart <= cursorXPos && cursorXPos <= optionXEnd && cursorYPos == 0{
 			return index // Option index found
 		}
 		optionXStart = optionXEnd
@@ -256,21 +333,49 @@ func (r *MenuBar) IndexAtPoint(x, y int) int {
 
 func (r *MenuBar) MouseHandler() func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(p tview.Primitive)) (consumed bool, capture tview.Primitive) {
 	return r.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(p tview.Primitive)) (consumed bool, capture tview.Primitive) {
-		if !r.InRect(event.Position()) {
-			return false, nil
-		}
+		index := r.IndexAtPoint(event.Position())
 
-		// Process mouse event.
 		switch action {
-			case tview.MouseLeftClick:
-				setFocus(r)
-				index := r.IndexAtPoint(event.Position())
-				if index == -1 {
-					r.CurrentOption = 0
-					r.SelectCurrentOption(true, setFocus) // Show current option collapsed
-				} else {
+		  case tview.MouseMove:
+				if index == -1 && r.CurrentOption != -1 && r.CurrentOptionExpanded  {
+					// Rollover out of the menu bar rect
+					if submenu := r.Options[r.CurrentOption].Submenu; submenu != nil {
+						submenu.MouseHandler()(tview.MouseMove, event, setFocus)
+					}
+				} else if index != -1 && r.CurrentOption != -1 && r.CurrentOptionExpanded  {
+					// Change and expand the new current option
 					r.CurrentOption = index
-					r.SelectCurrentOption(false, setFocus) // Show current option expanded if needed
+					r.expandCurrentOption(setFocus)
+				} else if index != -1 && !r.CurrentOptionExpanded  {
+					// Change the current option
+					r.CurrentOption = index
+				}
+				consumed = true
+
+			case tview.MouseLeftClick:
+				if index == -1 && r.CurrentOption != -1 && r.CurrentOptionExpanded  {
+					// Click out of the menu bar rect (probably over the expanded submenu)
+					if submenu := r.Options[r.CurrentOption].Submenu; submenu != nil {
+						// Propagate Click to submenu primitive
+						if consumed, _ := submenu.MouseHandler()(tview.MouseLeftClick, event, setFocus); !consumed {
+							// User did press the mouse button out of the dropdown menu rect
+							r.collapseCurrentOption(setFocus) // Collapse
+						}
+					}
+				} else if index == -1 {
+					// Click out of the menu bar rect and no submenu is actually expanded
+					setFocus(r)
+					r.HightlightFirstOption()
+				} else if !r.CurrentOptionExpanded {
+					// Highlight and expand the option selected in the menubar option
+					setFocus(r)
+					r.CurrentOption = index
+					r.expandCurrentOption(setFocus) // Expand
+					r.selectCurrentOption(setFocus) // Select (execute option callback if has one)
+				} else {
+					// Collapse any option in the menubar
+					r.collapseCurrentOption(setFocus) // Collapse
+					setFocus(r)
 				}
 				consumed = true
 		}
