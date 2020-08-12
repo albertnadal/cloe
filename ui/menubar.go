@@ -3,7 +3,7 @@ package uicloe
 import (
 	"fmt"
 	"github.com/gdamore/tcell"
-	"github.com/rivo/tview"
+	"github.com/albertnadal/cloe/tview"
 )
 
 type MenuBar struct {
@@ -250,7 +250,7 @@ func (r *MenuBar) collapseCurrentOption(setFocus func(p tview.Primitive)) {
 
 	// Collapse the current option
 	r.CurrentOptionExpanded = false
-	setFocus(r)
+	//setFocus(r)
 }
 
 func (r *MenuBar) expandCurrentOption(setFocus func(p tview.Primitive)) {
@@ -332,7 +332,10 @@ func (r *MenuBar) MouseHandler() func(action tview.MouseAction, event *tcell.Eve
 
 		switch action {
 			case tview.MouseMove:
-				if index == -1 && r.CurrentOption != -1 && r.CurrentOptionExpanded {
+				if r.CurrentOption == -1 && !r.CurrentOptionExpanded {
+					// Rollover when menubar has no focus
+					return false, nil
+				} else if index == -1 && r.CurrentOption != -1 && r.CurrentOptionExpanded {
 					// Rollover out of the menu bar rect
 					if submenu := r.Options[r.CurrentOption].Submenu; submenu != nil {
 						submenu.MouseHandler()(tview.MouseMove, event, setFocus)
@@ -354,12 +357,13 @@ func (r *MenuBar) MouseHandler() func(action tview.MouseAction, event *tcell.Eve
 						if consumed, _ := submenu.MouseHandler()(tview.MouseLeftClick, event, setFocus); !consumed {
 							// User did press the mouse button out of the dropdown menu rect
 							r.collapseCurrentOption(setFocus) // Collapse
+							r.CurrentOption = -1
+							return false, nil
 						}
 					}
 				} else if index == -1 {
 					// Click out of the menu bar rect and no submenu is actually expanded
-					setFocus(r)
-					r.hightlightFirstOption()
+					return false, nil
 				} else if !r.CurrentOptionExpanded {
 					// Highlight and expand the option selected in the menubar option
 					setFocus(r)
@@ -369,7 +373,6 @@ func (r *MenuBar) MouseHandler() func(action tview.MouseAction, event *tcell.Eve
 				} else {
 					// Collapse any option in the menubar
 					r.collapseCurrentOption(setFocus) // Collapse
-					setFocus(r)
 				}
 				consumed = true
 		}

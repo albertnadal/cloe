@@ -2,7 +2,7 @@ package uicloe
 
 import (
 	"github.com/gdamore/tcell"
-	"github.com/rivo/tview"
+	"github.com/albertnadal/cloe/tview"
 )
 
 var Styles = tview.Theme{
