@@ -46,7 +46,7 @@ func (f *FileInfo) GetDisplayName() string {
 
 func NewFileBrowser() *FileBrowser {
 	table := tview.NewTable().SetFixed(1, 1).SetSelectable(true, false)
-	table.SetBorder(true).SetTitle("File browser")
+	table.SetBorder(true)
 
 	// File used to save debug logs
 	logfile, err := os.OpenFile("debug.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -64,7 +64,7 @@ func NewFileBrowser() *FileBrowser {
 		Files:									 []*FileInfo{},
 		FileLog:								 logfile,
 	}
-
+	table.SetTitle(browser.Path)
 	browser.focus = browser
 	browser.Init()
 	return browser
@@ -77,6 +77,7 @@ func (r *FileBrowser) changePath(path string) error {
 	r.Path = path
 	r.readPath()
 	r.updateTable()
+	r.Table.SetTitle(r.Path)
 	r.Table.ScrollToBeginning()
 	r.Table.Select(1, 0) // Hightlight first file of the table
 	return nil
@@ -172,8 +173,6 @@ func (r *FileBrowser) updateTable() {
 		if (row-1 < len(r.Files)) && (r.Files[row-1].IsDir) {
 			log.Printf("Selected folder path: %v", r.Files[row-1].Path)
 			r.changePath(r.Files[row-1].Path)
-			//r.Table.GetCell(row, column).SetTextColor(tcell.ColorRed)
-			//r.Table.SetSelectable(false, false)
 		}
 	})
 }
