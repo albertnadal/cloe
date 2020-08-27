@@ -13,5 +13,6 @@ require (
 	github.com/sergi/go-diff v1.1.0
 	github.com/shurcooL/httpfs v0.0.0-20190707220628-8d4bc4ba7749 // indirect
 	github.com/shurcooL/vfsgen v0.0.0-20200627165143-92b8a710ab6c // indirect
+	github.com/spf13/afero v1.3.4
 	github.com/zyedidia/micro v1.4.1
 )
