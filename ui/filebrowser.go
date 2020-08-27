@@ -1,7 +1,6 @@
 package uicloe
 
 import (
-	//"fmt"
 	"os"
 	"log"
 	"strings"
@@ -19,6 +18,7 @@ type FileBrowser struct {
 	Table                   *tview.Table
 	focus                   tview.Focusable
 	Fs                      afero.Fs
+	Root										string
 	Path					  				string
 	Files										[]*FileInfo
 	FileLog									*os.File
@@ -49,7 +49,7 @@ func NewFileBrowser() *FileBrowser {
 	table.SetBorder(true).SetTitle("File browser")
 
 	// File used to save debug logs
-	logfile, err := os.OpenFile("info.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	logfile, err := os.OpenFile("debug.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 			log.Fatal(err)
 	}
@@ -59,7 +59,8 @@ func NewFileBrowser() *FileBrowser {
 		Box:                     tview.NewBox().SetBorder(false),
 		Table:									 table,
 		Fs:                      afero.NewOsFs(),
-		Path:					 					 ".",
+		Root:										 "/",
+		Path:					 					 "/",
 		Files:									 []*FileInfo{},
 		FileLog:								 logfile,
 	}
@@ -72,31 +73,48 @@ func NewFileBrowser() *FileBrowser {
 func (r *FileBrowser) Blur() {
 }
 
+func (r *FileBrowser) changePath(path string) error {
+	r.Path = path
+	r.readPath()
+	r.updateTable()
+	r.Table.ScrollToBeginning()
+	r.Table.Select(1, 0) // Hightlight first file of the table
+	return nil
+}
+
 func (r *FileBrowser) readPath() error {
 	dir, err := afero.ReadDir(r.Fs, r.Path)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("%v+", dir)
-
 	r.Files = []*FileInfo{}
 
-	// Parent directory ..
-	parentDir := &FileInfo{
-		Name:      "..",
-		Size:      0,
-		ModTime:   time.Now(),
-		Mode:      0,
-		IsDir:     true,
-		Extension: "",
-		Path:      "..",
+	if r.Root != r.Path {
+		// Parent directory dir /..
+		upperPath := r.Path
+		if pathSliced := strings.Split(r.Path, "/"); len(pathSliced) > 0 {
+			pathSliced = pathSliced[:len(pathSliced)-1]
+			upperPath = strings.Join(pathSliced[:], "/")
+			if len(upperPath) == 0 {
+				upperPath = "/"
+			}
+		}
+
+		parentDir := &FileInfo{
+			Name:      "..",
+			Size:      0,
+			ModTime:   time.Now(),
+			Mode:      0,
+			IsDir:     true,
+			Extension: "",
+			Path:      upperPath,
+		}
+		r.Files = append(r.Files, parentDir)
 	}
-	r.Files = append(r.Files, parentDir)
 
 	for _, f := range dir {
 		name := f.Name()
-		log.Printf("File: %s", name)
 		filePath := path.Join(r.Path, name)
 
 		if strings.HasPrefix(f.Mode().String(), "L") {
@@ -125,12 +143,16 @@ func (r *FileBrowser) readPath() error {
 }
 
 func (r *FileBrowser) Init() {
-	log.Printf("CurrentFolder: %s", r.Path)
-
 	err := r.readPath()
 	if err != nil {
 		log.Printf("Error when reading path %s | Err: %v", r.Path, err)
 	}
+
+	r.updateTable()
+}
+
+func (r *FileBrowser) updateTable() {
+	r.Table.Clear()
 
 	// Table headers
 	r.Table.SetCell(0, 0, tview.NewTableCell("Name").SetTextColor(tcell.ColorYellow).SetAlign(tview.AlignLeft).SetSelectable(false).SetExpansion(1))
@@ -143,6 +165,17 @@ func (r *FileBrowser) Init() {
 		r.Table.SetCell(row+1, 1, tview.NewTableCell(strconv.FormatInt(file.Size, 10)).SetTextColor(tcell.ColorWhite).SetAlign(tview.AlignRight).SetSelectable(true).SetMaxWidth(15))
 		r.Table.SetCell(row+1, 2, tview.NewTableCell(" "+strings.ToLower(file.ModTime.Format("Jan 2 15:04"))).SetTextColor(tcell.ColorWhite).SetAlign(tview.AlignRight).SetSelectable(true).SetMaxWidth(15))
 	}
+
+	// Callback function when user selects a file
+	r.Table.SetSelectedFunc(func(row int, column int) {
+		// In case of file is a Directory
+		if (row-1 < len(r.Files)) && (r.Files[row-1].IsDir) {
+			log.Printf("Selected folder path: %v", r.Files[row-1].Path)
+			r.changePath(r.Files[row-1].Path)
+			//r.Table.GetCell(row, column).SetTextColor(tcell.ColorRed)
+			//r.Table.SetSelectable(false, false)
+		}
+	})
 }
 
 func (r *FileBrowser) Draw(screen tcell.Screen) {
